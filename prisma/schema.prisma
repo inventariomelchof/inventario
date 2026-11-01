@@ -23,9 +23,42 @@ model User {
   createdAt DateTime @default(now())
   movements KardexMovement[]
   pickLists PickList[]
-accounts  Account[]
+  accounts  Account[]
   sessions  Session[]
 }
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
 model Category {
   id       String    @id @default(cuid())
   name     String    @unique
@@ -48,29 +81,30 @@ model Brand {
 }
 
 model Product {
-  id           String   @id @default(cuid())
-  internalCode String   @unique
-  barcode      String?
-  name         String
-  description  String?
-  expirationDate DateTime?
-
-  categoryId   String
-  familyId     String
-  brandId      String
-  category     Category @relation(fields: [categoryId], references: [id])
-  family       Family   @relation(fields: [familyId], references: [id])
-  brand        Brand    @relation(fields: [brandId], references: [id])
+  id              String    @id @default(cuid())
+  internalCode    String    @unique
+  barcode         String?
+  name            String
+  description     String?
+  expirationDate  DateTime?
   
-  unitWeight   Float
-  totalWeight  Float
-  stock        Int      @default(0)
-  minStock     Int      @default(5)
-    damagedStock Int      @default(0)
-  units        ProductUnit[]
-  movements    KardexMovement[]
-  pickItems    PickListItem[]
-  createdAt    DateTime @default(now())
+  categoryId      String
+  familyId        String
+  brandId         String
+  category        Category  @relation(fields: [categoryId], references: [id])
+  family          Family    @relation(fields: [familyId], references: [id])
+  brand           Brand     @relation(fields: [brandId], references: [id])
+  
+  unitWeight      Float
+  totalWeight     Float
+  stock           Int       @default(0)
+  minStock        Int       @default(5)
+  damagedStock    Int       @default(0)
+  
+  units           ProductUnit[]
+  movements       KardexMovement[]
+  pickItems       PickListItem[]
+  createdAt       DateTime  @default(now())
 }
 
 model ProductUnit {
@@ -80,6 +114,52 @@ model ProductUnit {
   price      Float
   productId  String
   product    Product @relation(fields: [productId], references: [id])
+}
+
+model Entry {
+  id             String      @id @default(cuid())
+  entryNumber    String      @unique
+  type           String      @default("factura")
+  receivedBy     String?
+  observations   String?
+  expirationDate DateTime?
+  totalItems     Int
+  totalWeight    Float?
+  createdAt      DateTime    @default(now())
+  items          EntryItem[]
+}
+
+model EntryItem {
+  id        String  @id @default(cuid())
+  entryId   String
+  productId String
+  quantity  Int
+  weight    Float?
+  entry     Entry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+}
+
+model Exit {
+  id          String      @id @default(cuid())
+  exitNumber  String      @unique
+  reason      String
+  deliveredBy String?
+  receivedBy  String?
+  observations String?
+  totalItems  Int
+  totalWeight Float?
+  createdAt   DateTime    @default(now())
+  items       ExitItem[]
+}
+
+model ExitItem {
+  id        String  @id @default(cuid())
+  exitId    String
+  productId String
+  quantity  Int
+  weight    Float?
+  exit      Exit    @relation(fields: [exitId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
 }
 
 model PickList {
@@ -114,35 +194,4 @@ model KardexMovement {
   user          User     @relation(fields: [userId], references: [id])
   product       Product  @relation(fields: [productId], references: [id])
   createdAt     DateTime @default(now())
-}
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String? @db.Text
-  session_state     String?
-  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-  @@unique([identifier, token])
 }

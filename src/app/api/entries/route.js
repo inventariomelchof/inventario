@@ -17,24 +17,29 @@ export async function GET() {
 export async function POST(request) {
   try {
     const data = await request.json()
-    
-    // 1. Buscamos el producto actual
     const product = await prisma.product.findUnique({ where: { id: data.productId } })
     if (!product) return NextResponse.json({ error: 'Producto no encontrado' }, { status: 404 })
 
     const quantity = parseInt(data.quantity)
     const newStock = product.stock + quantity
+    
+    let finalDate = product.expirationDate;
+    if (data.expirationDate) {
+       const newDate = new Date(data.expirationDate);
+       if (!finalDate || newDate < new Date(finalDate)) {
+           finalDate = newDate;
+       }
+    }
 
-    // 2. Actualizamos el stock del producto
     await prisma.product.update({
       where: { id: product.id },
       data: { 
         stock: newStock,
-        totalWeight: newStock * product.unitWeight
+        totalWeight: newStock * product.unitWeight,
+        expirationDate: finalDate
       }
     })
 
-    // 3. Registramos el movimiento en el Kardex
     const movement = await prisma.kardexMovement.create({
       data: {
         productId: product.id,
@@ -42,13 +47,13 @@ export async function POST(request) {
         quantity: quantity,
         previousStock: product.stock,
         newStock: newStock,
-        userId: 'admin', // Por ahora usaremos 'admin', luego crearemos el Login
+        userId: 'admin',
       }
     })
 
     return NextResponse.json(movement)
   } catch (error) {
     console.error(error)
-    return NextResponse.json({ error: 'Error al registrar entrada' }, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
