@@ -53,7 +53,8 @@ model Product {
   barcode      String?
   name         String
   description  String?
-  
+  expirationDate DateTime?
+
   categoryId   String
   familyId     String
   brandId      String
