@@ -104,6 +104,8 @@ model Product {
   units           ProductUnit[]
   movements       KardexMovement[]
   pickItems       PickListItem[]
+  entries         EntryItem[] // <-- LÍNEA AGREGADA
+  exits           ExitItem[]  // <-- LÍNEA AGREGADA
   createdAt       DateTime  @default(now())
 }
 
