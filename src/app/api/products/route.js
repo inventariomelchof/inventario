@@ -45,28 +45,15 @@ export async function POST(request) {
       finalBarcode = `200${randomPart}`;
     }
 
-    // VALIDACIONES PARA EVITAR EL ERROR DE PRISMA
-    const parsedStock = parseInt(data.stock);
-    const finalStock = isNaN(parsedStock) ? 0 : parsedStock;
-
-    const parsedWeight = parseFloat(data.unitWeight);
-    const finalUnitWeight = isNaN(parsedWeight) ? 0 : parsedWeight;
-
-    let finalDate = null;
-    if (data.expirationDate && data.expirationDate.trim() !== '') {
-      const d = new Date(data.expirationDate);
-      if (!isNaN(d.getTime())) finalDate = d; // Solo guarda si la fecha es válida
-    }
-
     const product = await prisma.product.create({
       data: {
         internalCode: 'P-' + Date.now().toString().slice(-6),
         barcode: finalBarcode,
         name: data.name,
-        unitWeight: finalUnitWeight,
-        totalWeight: finalUnitWeight * finalStock,
-        stock: finalStock,
-        expirationDate: finalDate,
+        unitWeight: parseFloat(data.unitWeight) || 0,
+        totalWeight: 0, // Inicia en 0
+        stock: 0,       // Inicia en 0, se llena en Entradas
+        description: '', // Se deja vacío
         categoryId: category.id,
         familyId: family.id,
         brandId: brand.id,
@@ -75,7 +62,7 @@ export async function POST(request) {
     })
     return NextResponse.json(product)
   } catch (error) {
-    console.error("ERROR DETALLADO:", error)
+    console.error(error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

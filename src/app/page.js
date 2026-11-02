@@ -23,12 +23,12 @@ export default function Home() {
   const [filterBrand, setFilterBrand] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
 
-  // Productos
+  // Productos (Sin Descripción ni Stock)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [formData, setFormData] = useState({
     name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas',
-    unitWeight: '', stock: '', priceUnit: '', barcode: '', description: '',
+    unitWeight: '', priceUnit: '', barcode: '',
     customUnits: []
   })
 
@@ -163,7 +163,7 @@ export default function Home() {
     const dataToSend = { ...formData, name: fullName } 
 
     await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataToSend) })
-    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', stock: '', priceUnit: '', barcode: '', description: '', customUnits: [] })
+    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', priceUnit: '', barcode: '', customUnits: [] })
     setEditingId(null); setShowForm(false); await fetchProducts(); setLoading(false)
   }
 
@@ -176,9 +176,9 @@ export default function Home() {
     setFormData({
       name: product.name, presentation: '', unitsPerPackage: '1', brand: product.brand?.name || '', 
       category: product.category?.name || 'Bebidas', family: product.family?.name || 'Gaseosas',
-      unitWeight: product.unitWeight.toString(), stock: product.stock.toString(), 
+      unitWeight: product.unitWeight.toString(), 
       priceUnit: product.units?.find(u => u.name === 'Unidad')?.price.toString() || '',
-      barcode: product.barcode || '', description: product.description || '', customUnits: custom
+      barcode: product.barcode || '', customUnits: custom
     })
     setEditingId(product.id); setShowForm(true); setView('products')
   }
@@ -387,8 +387,6 @@ export default function Home() {
               <button type="button" onClick={() => { setScanMode('form'); setShowScanner(true); }} style={{ padding: '10px 20px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>📷 Escanear</button>
             </div>
 
-            <input type="text" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="Descripción (Opcional)" style={{ gridColumn: 'span 2', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-
             <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Nombre Base (Ej: Agua Cielo)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             <input type="text" required value={formData.presentation} onChange={e => setFormData({...formData, presentation: e.target.value})} placeholder="Medida/Peso (Ej: 2.5L)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             
@@ -400,7 +398,6 @@ export default function Home() {
             </div>
 
             <input type="number" step="0.01" required value={formData.unitWeight} onChange={e => setFormData({...formData, unitWeight: e.target.value})} placeholder="Peso 1 unidad (kg)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-            <input type="number" required value={formData.stock} onChange={e => setFormData({...formData, stock: e.target.value})} placeholder="Stock Inicial (Unidades sueltas)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             <input type="number" step="0.01" required value={formData.priceUnit} onChange={e => setFormData({...formData, priceUnit: e.target.value})} placeholder="Precio por Unidad (S/)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
 
             <button type="submit" disabled={loading} style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', marginTop: '10px' }}>Guardar Producto</button>
