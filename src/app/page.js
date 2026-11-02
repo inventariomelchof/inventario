@@ -16,33 +16,36 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   
   const [isOnline, setIsOnline] = useState(true)
-  const [isSyncing, setIsSyncing] = useState(false)
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterBrand, setFilterBrand] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
 
-  // Productos (Sin Descripción ni Stock)
+  // Productos (Sin precio ni stock)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [formData, setFormData] = useState({
     name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas',
-    unitWeight: '', priceUnit: '', barcode: '',
-    customUnits: []
+    unitWeight: '', barcode: '', customUnits: []
   })
 
   // Entradas
   const [entryForm, setEntryForm] = useState({ productId: '', packages: '', units: '', expirationDate: '' })
+  const [entrySearch, setEntrySearch] = useState('')
+  const [showEntryDropdown, setShowEntryDropdown] = useState(false)
   const [kardex, setKardex] = useState([])
 
   // Salidas
   const [cart, setCart] = useState([])
   const [exitForm, setExitForm] = useState({ productId: '', packages: '', units: '', reason: 'Venta', deliveredBy: '', receivedBy: '' })
-  const PESO_MAXIMO_MOTO = 500 
+  const [exitSearch, setExitSearch] = useState('')
+  const [showExitDropdown, setShowExitDropdown] = useState(false)
+  const [transportType, setTransportType] = useState('Moto')
+  const [maxWeight, setMaxWeight] = useState(500)
 
   // Mermas
-  const [mermaForm, setMermaForm] = useState({ productId: '', quantity: '', unitMultiplier: 1 })
+  const [mermaForm, setMermaForm] = useState({ productId: '', quantity: '' })
+  const [mermaSearch, setMermaSearch] = useState('')
+  const [showMermaDropdown, setShowMermaDropdown] = useState(false)
 
   // Usuarios
   const [users, setUsers] = useState([])
@@ -52,30 +55,12 @@ export default function Home() {
   const [showScanner, setShowScanner] = useState(false)
   const [scanMode, setScanMode] = useState('')
 
-  const syncOfflineData = async () => {
-    const pendingEntries = JSON.parse(localStorage.getItem('pending_entries') || '[]');
-    if (pendingEntries.length > 0) {
-      setIsSyncing(true);
-      try {
-        for (const entry of pendingEntries) {
-          await fetch('/api/entries', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry)
-          });
-        }
-        localStorage.removeItem('pending_entries');
-        await fetchProducts(); await fetchKardex();
-        alert(`✅ Se sincronizaron ${pendingEntries.length} entradas offline.`);
-      } catch (error) { console.error(error); } finally { setIsSyncing(false); }
-    }
-  };
-
   useEffect(() => {
     setIsOnline(navigator.onLine)
-    const handleOnline = () => { setIsOnline(true); syncOfflineData(); }
+    const handleOnline = () => setIsOnline(true)
     const handleOffline = () => setIsOnline(false)
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-    if (navigator.onLine) syncOfflineData();
     return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); }
   }, [])
 
@@ -143,12 +128,13 @@ export default function Home() {
   const getExpirationAlert = (dateStr) => {
     if (!dateStr) return { text: '---', color: '#9ca3af', bg: 'transparent' }
     const diffDays = Math.ceil((new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24))
-    if (diffDays < 0) return { text: `VENCIDO (${new Date(dateStr).toLocaleDateString()})`, color: '#ef4444', bg: '#fee2e2' }
+    if (diffDays < 0) return { text: `VENCIDO`, color: '#ef4444', bg: '#fee2e2' }
     if (diffDays <= 30) return { text: `Vence en ${diffDays} días`, color: '#b45309', bg: '#fef3c7' }
     return { text: new Date(dateStr).toLocaleDateString(), color: '#10b981', bg: 'transparent' }
   }
 
-  const addCustomUnit = () => setFormData({ ...formData, customUnits: [...formData.customUnits, { name: '', multiplier: '', price: '' }] })
+  // --- LÓGICA DE PRODUCTOS ---
+  const addCustomUnit = () => setFormData({ ...formData, customUnits: [...formData.customUnits, { name: '', multiplier: '', price: 0 }] })
   const updateCustomUnit = (index, field, value) => {
     const newUnits = [...formData.customUnits]; newUnits[index][field] = value; setFormData({ ...formData, customUnits: newUnits })
   }
@@ -160,10 +146,11 @@ export default function Home() {
     const method = editingId ? 'PUT' : 'POST'
     
     const fullName = `${formData.name} ${formData.presentation} x${formData.unitsPerPackage}UND (${formData.brand})`.toUpperCase()
-    const dataToSend = { ...formData, name: fullName } 
+    // Se envía priceUnit: 0 por defecto ya que se quitó del formulario
+    const dataToSend = { ...formData, name: fullName, priceUnit: 0 } 
 
     await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataToSend) })
-    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', priceUnit: '', barcode: '', customUnits: [] })
+    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', barcode: '', customUnits: [] })
     setEditingId(null); setShowForm(false); await fetchProducts(); setLoading(false)
   }
 
@@ -172,17 +159,16 @@ export default function Home() {
   }
 
   const handleEdit = (product) => {
-    const custom = product.units?.filter(u => u.name !== 'Unidad').map(u => ({ name: u.name, multiplier: u.multiplier.toString(), price: u.price.toString() })) || []
+    const custom = product.units?.filter(u => u.name !== 'Unidad').map(u => ({ name: u.name, multiplier: u.multiplier.toString(), price: 0 })) || []
     setFormData({
       name: product.name, presentation: '', unitsPerPackage: '1', brand: product.brand?.name || '', 
       category: product.category?.name || 'Bebidas', family: product.family?.name || 'Gaseosas',
-      unitWeight: product.unitWeight.toString(), 
-      priceUnit: product.units?.find(u => u.name === 'Unidad')?.price.toString() || '',
-      barcode: product.barcode || '', customUnits: custom
+      unitWeight: product.unitWeight.toString(), barcode: product.barcode || '', customUnits: custom
     })
     setEditingId(product.id); setShowForm(true); setView('products')
   }
 
+  // --- LÓGICA DE ENTRADAS ---
   const handleEntrySubmit = async (e) => {
     e.preventDefault(); setLoading(true)
     const product = products.find(p => p.id === entryForm.productId)
@@ -194,18 +180,12 @@ export default function Home() {
 
     const dataToSend = { productId: entryForm.productId, quantity: totalUnits, expirationDate: entryForm.expirationDate || null };
 
-    if (!isOnline) {
-      const pending = JSON.parse(localStorage.getItem('pending_entries') || '[]');
-      pending.push(dataToSend); localStorage.setItem('pending_entries', JSON.stringify(pending));
-      alert('⚠️ Estás sin conexión. Se guardó localmente.');
-      setEntryForm({ productId: '', packages: '', units: '', expirationDate: '' }); setLoading(false); return;
-    }
-
     await fetch('/api/entries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataToSend) })
-    setEntryForm({ productId: '', packages: '', units: '', expirationDate: '' }); 
+    setEntryForm({ productId: '', packages: '', units: '', expirationDate: '' }); setEntrySearch('');
     await fetchProducts(); await fetchKardex(); setLoading(false); setView('kardex')
   }
 
+  // --- LÓGICA DE SALIDAS ---
   const addToCart = (e) => {
     e.preventDefault()
     const product = products.find(p => p.id === exitForm.productId)
@@ -215,16 +195,33 @@ export default function Home() {
     const totalUnits = (parseInt(exitForm.packages || 0) * multiplier) + parseInt(exitForm.units || 0);
 
     if (totalUnits <= 0) return alert('Ingrese una cantidad válida')
-    if (totalUnits > product.stock) return alert(`Stock insuficiente. Solo hay ${formatStock(product)}`)
+    const alreadyInCart = cart.find(c => c.id === product.id)?.quantity || 0;
+    if ((totalUnits + alreadyInCart) > product.stock) return alert(`Stock insuficiente. Solo hay ${formatStock(product)}`)
 
-    setCart([...cart, { id: product.id, name: product.name, quantity: totalUnits, weight: product.unitWeight * totalUnits }])
-    setExitForm({ ...exitForm, productId: '', packages: '', units: '' })
+    const existingIndex = cart.findIndex(c => c.id === product.id);
+    if(existingIndex >= 0) {
+        const newCart = [...cart];
+        newCart[existingIndex].quantity += totalUnits;
+        newCart[existingIndex].weight = newCart[existingIndex].quantity * product.unitWeight;
+        setCart(newCart);
+    } else {
+        setCart([...cart, { id: product.id, name: product.name, quantity: totalUnits, weight: product.unitWeight * totalUnits, unitWeight: product.unitWeight }])
+    }
+    
+    setExitForm({ ...exitForm, productId: '', packages: '', units: '' });
+    setExitSearch('');
   }
+
+  const updateCartQuantity = (id, newQuantity) => {
+    if (newQuantity <= 0) return;
+    setCart(cart.map(c => c.id === id ? { ...c, quantity: newQuantity, weight: newQuantity * c.unitWeight } : c));
+  }
+
+  const removeFromCart = (id) => { setCart(cart.filter(c => c.id !== id)); }
 
   const handleExitSubmit = async () => {
     if (cart.length === 0) return alert('La lista está vacía')
     if (!exitForm.deliveredBy || !exitForm.receivedBy) return alert('Complete quién entrega y quién recibe')
-    if (!isOnline) return alert('⚠️ Las salidas requieren internet.');
     
     setLoading(true)
     const items = cart.map(c => ({ productId: c.id, quantity: c.quantity }))
@@ -239,7 +236,7 @@ export default function Home() {
         <html><head><title>Ticket</title><style>body { font-family: 'Courier New', monospace; width: 80mm; margin: 0 auto; padding: 10px; font-size: 12px; } .text-center { text-align: center; } .bold { font-weight: bold; } .line { border-bottom: 1px dashed #000; margin: 5px 0; } table { width: 100%; border-collapse: collapse; } th, td { padding: 2px 0; text-align: left; } th { border-bottom: 1px dashed #000; }</style></head>
         <body>
           <div class="text-center bold" style="font-size: 16px;">MI EMPRESA S.A.C.</div><div class="text-center">RUC: 20123456789</div><div class="text-center">TICKET DE SALIDA</div><div class="line"></div>
-          <div>Fecha: ${new Date().toLocaleString()}</div><div>Entrega: ${exitForm.deliveredBy}</div><div>Recibe: ${exitForm.receivedBy}</div><div class="line"></div>
+          <div>Fecha: ${new Date().toLocaleString()}</div><div>Transporte: ${transportType}</div><div>Entrega: ${exitForm.deliveredBy}</div><div>Recibe: ${exitForm.receivedBy}</div><div class="line"></div>
           <table><thead><tr><th>Cant.</th><th>Producto</th></tr></thead><tbody>${cart.map(item => `<tr><td class="bold">${item.quantity} und</td><td>${item.name}</td></tr>`).join('')}</tbody></table>
           <div class="line"></div><div class="bold">Peso Total: ${totalWeight.toFixed(2)} kg</div><div class="line"></div>
           <div class="text-center" style="margin-top: 10px;">_______________________</div><div class="text-center">Firma de Recepción</div>
@@ -247,7 +244,7 @@ export default function Home() {
       `;
       const printWindow = window.open('', '_blank'); printWindow.document.write(ticketHTML); printWindow.document.close(); printWindow.focus(); printWindow.print();
       alert('✅ Salida despachada.')
-      setCart([]); setExitForm({ productId: '', packages: '', units: '', reason: 'Venta', deliveredBy: '', receivedBy: '' })
+      setCart([]); setExitForm({ productId: '', packages: '', units: '', reason: 'Venta', deliveredBy: '', receivedBy: '' }); setExitSearch('');
       await fetchProducts(); await fetchKardex(); setView('kardex')
     } catch (error) { alert('Error: ' + error.message) }
     setLoading(false)
@@ -255,13 +252,12 @@ export default function Home() {
 
   const handleMermaSubmit = async (e) => {
     e.preventDefault(); setLoading(true)
-    if (!isOnline) return alert('⚠️ Requiere internet.');
-    const finalQuantity = parseInt(mermaForm.quantity) * parseInt(mermaForm.unitMultiplier)
+    const finalQuantity = parseInt(mermaForm.quantity)
     try {
       const res = await fetch('/api/mermas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ productId: mermaForm.productId, quantity: finalQuantity }) })
       if (!res.ok) throw new Error((await res.json()).error)
       alert(`✅ Se registraron ${finalQuantity} unidades como merma.`)
-      setMermaForm({ productId: '', quantity: '', unitMultiplier: 1 }); await fetchProducts(); await fetchKardex()
+      setMermaForm({ productId: '', quantity: '' }); setMermaSearch(''); await fetchProducts(); await fetchKardex()
     } catch (error) { alert('Error: ' + error.message) }
     setLoading(false)
   }
@@ -277,11 +273,10 @@ export default function Home() {
     setLoading(false)
   }
 
+  // --- EXPORTACIONES ---
   const exportProductsToExcel = () => {
     const dataToExport = filteredProducts.map(p => ({
-      'Código': p.internalCode, 'Código de Barras': p.barcode || '-', 'Producto': p.name,
-      'Marca': p.brand?.name || '-', 'Stock (Unidades)': p.stock, 'Stock (Desglose)': formatStock(p),
-      'Precio Unidad': p.units?.find(u => u.name === 'Unidad')?.price || 0
+      'Código': p.internalCode, 'Producto': p.name, 'Marca': p.brand?.name || '-', 'Stock': formatStock(p)
     }))
     const ws = XLSX.utils.json_to_sheet(dataToExport); const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Inventario"); XLSX.writeFile(wb, "Inventario.xlsx")
@@ -295,13 +290,17 @@ export default function Home() {
   }
 
   const totalWeight = cart.reduce((sum, item) => sum + item.weight, 0)
-  const excedePeso = totalWeight > PESO_MAXIMO_MOTO
-  const selectedMermaProduct = products.find(p => p.id === mermaForm.productId)
+  const excedePeso = totalWeight > maxWeight
 
   const filteredProducts = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.barcode && p.barcode.includes(searchTerm));
     return matchSearch;
   });
+
+  // Filtros para buscadores inteligentes
+  const entryFiltered = products.filter(p => p.name.toLowerCase().includes(entrySearch.toLowerCase()));
+  const exitFiltered = products.filter(p => p.name.toLowerCase().includes(exitSearch.toLowerCase()));
+  const mermaFiltered = products.filter(p => p.name.toLowerCase().includes(mermaSearch.toLowerCase()));
 
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1000px', margin: '0 auto', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
@@ -398,8 +397,7 @@ export default function Home() {
             </div>
 
             <input type="number" step="0.01" required value={formData.unitWeight} onChange={e => setFormData({...formData, unitWeight: e.target.value})} placeholder="Peso 1 unidad (kg)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-            <input type="number" step="0.01" required value={formData.priceUnit} onChange={e => setFormData({...formData, priceUnit: e.target.value})} placeholder="Precio por Unidad (S/)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-
+            
             <button type="submit" disabled={loading} style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', marginTop: '10px' }}>Guardar Producto</button>
             <button type="button" onClick={() => setShowForm(false)} style={{ gridColumn: 'span 2', padding: '10px', backgroundColor: 'transparent', color: '#6b7280', border: 'none', cursor: 'pointer' }}>Cancelar</button>
           </form>
@@ -410,11 +408,27 @@ export default function Home() {
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <h2>Registrar Entrada</h2>
           <form onSubmit={handleEntrySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
-            <select required value={entryForm.productId} onChange={e => setEntryForm({...entryForm, productId: e.target.value})} style={{ padding: '10px', borderRadius: '6px' }}>
-              <option value="">Seleccione producto...</option>
-              {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {formatStock(p)})</option>)}
-            </select>
             
+            {/* BUSCADOR INTELIGENTE */}
+            <div style={{ position: 'relative' }}>
+              <input 
+                type="text" placeholder="Buscar producto..." 
+                value={entryForm.productId ? products.find(p=>p.id===entryForm.productId)?.name : entrySearch} 
+                onChange={e => { setEntrySearch(e.target.value); setEntryForm({...entryForm, productId: ''}); setShowEntryDropdown(true); }}
+                onFocus={() => setShowEntryDropdown(true)}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+              />
+              {showEntryDropdown && entrySearch && (
+                <div style={{ position: 'absolute', zIndex: 10, width: '100%', backgroundColor: 'white', border: '1px solid #ccc', maxHeight: '150px', overflowY: 'auto', borderRadius: '6px', marginTop: '5px' }}>
+                  {entryFiltered.map(p => (
+                    <div key={p.id} onClick={() => { setEntryForm({...entryForm, productId: p.id}); setEntrySearch(''); setShowEntryDropdown(false); }} style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee' }}>
+                      {p.name} (Stock: {formatStock(p)})
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', gap: '10px' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Paquetes</label>
@@ -439,13 +453,39 @@ export default function Home() {
       {view === 'exits' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
           <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
-            <h2>🚚 Cargar a la Moto</h2>
-            <form onSubmit={addToCart} style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
-              <select required value={exitForm.productId} onChange={e => setExitForm({...exitForm, productId: e.target.value})} style={{ padding: '10px', borderRadius: '6px' }}>
-                <option value="">Seleccione producto...</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} (Hay: {formatStock(p)})</option>)}
-              </select>
+            <h2>🚚 Preparar Salida</h2>
+            
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                <select value={transportType} onChange={e => setTransportType(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
+                    <option value="Moto">Motocarga</option>
+                    <option value="Carreta">Carreta</option>
+                    <option value="Propio">Propio (Mano)</option>
+                </select>
+                <input type="number" value={maxWeight} onChange={e => setMaxWeight(e.target.value)} placeholder="Peso max (kg)" style={{ width: '120px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            </div>
+
+            <form onSubmit={addToCart} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               
+              {/* BUSCADOR INTELIGENTE */}
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="text" placeholder="Buscar producto..." 
+                  value={exitForm.productId ? products.find(p=>p.id===exitForm.productId)?.name : exitSearch} 
+                  onChange={e => { setExitSearch(e.target.value); setExitForm({...exitForm, productId: ''}); setShowExitDropdown(true); }}
+                  onFocus={() => setShowExitDropdown(true)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+                {showExitDropdown && exitSearch && (
+                  <div style={{ position: 'absolute', zIndex: 10, width: '100%', backgroundColor: 'white', border: '1px solid #ccc', maxHeight: '150px', overflowY: 'auto', borderRadius: '6px', marginTop: '5px' }}>
+                    {exitFiltered.map(p => (
+                      <div key={p.id} onClick={() => { setExitForm({...exitForm, productId: p.id}); setExitSearch(''); setShowExitDropdown(false); }} style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee' }}>
+                        {p.name} (Hay: {formatStock(p)})
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: 'flex', gap: '10px' }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Paquetes</label>
@@ -462,15 +502,23 @@ export default function Home() {
           </div>
           
           <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px', border: excedePeso ? '3px solid red' : '1px solid #e5e7eb' }}>
-            <h2>Lista de Carga</h2>
+            <h2>Lista de Carga ({transportType})</h2>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               {cart.map((item, index) => (
-                <li key={index} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #eee' }}>
-                  <span>{item.quantity} und x {item.name}</span>
-                  <span style={{ fontWeight: 'bold' }}>{item.weight.toFixed(2)} kg</span>
+                <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #eee' }}>
+                  <span style={{ flex: 1 }}>{item.name}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <input type="number" value={item.quantity} onChange={(e) => updateCartQuantity(item.id, parseInt(e.target.value))} style={{ width: '60px', padding: '5px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                      <button onClick={() => removeFromCart(item.id)} style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '5px 8px', borderRadius: '4px' }}>X</button>
+                  </div>
+                  <span style={{ fontWeight: 'bold', width: '70px', textAlign: 'right' }}>{item.weight.toFixed(2)} kg</span>
                 </li>
               ))}
             </ul>
+            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: excedePeso ? '#fee2e2' : '#f3f4f6', borderRadius: '8px' }}>
+              <p style={{ margin: 0, fontWeight: 'bold' }}>Peso Total: {totalWeight.toFixed(2)} kg (Max: {maxWeight} kg)</p>
+              {excedePeso && <p style={{ margin: '5px 0 0 0', color: '#b91c1c', fontWeight: 'bold', fontSize: '14px' }}>⚠️ ¡EXCEDE EL PESO PERMITIDO!</p>}
+            </div>
             {cart.length > 0 && (
               <div style={{ marginTop: '20px', borderTop: '2px solid #e5e7eb', paddingTop: '20px' }}>
                 <input type="text" placeholder="Entregado por" value={exitForm.deliveredBy} onChange={e => setExitForm({...exitForm, deliveredBy: e.target.value})} style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px' }} />
@@ -485,17 +533,33 @@ export default function Home() {
       {view === 'mermas' && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <h2>⚠️ Reportar Merma</h2>
-          <form onSubmit={handleMermaSubmit} style={{ display: 'flex', gap: '15px', marginTop: '20px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1 }}>
-              <select required value={mermaForm.productId} onChange={e => setMermaForm({...mermaForm, productId: e.target.value, unitMultiplier: 1})} style={{ width: '100%', padding: '10px', borderRadius: '6px' }}>
-                <option value="">Seleccione producto...</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} (Hay: {formatStock(p)})</option>)}
-              </select>
+          <form onSubmit={handleMermaSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
+            
+            {/* BUSCADOR INTELIGENTE */}
+            <div style={{ position: 'relative' }}>
+              <input 
+                type="text" placeholder="Buscar producto..." 
+                value={mermaForm.productId ? products.find(p=>p.id===mermaForm.productId)?.name : mermaSearch} 
+                onChange={e => { setMermaSearch(e.target.value); setMermaForm({...mermaForm, productId: ''}); setShowMermaDropdown(true); }}
+                onFocus={() => setShowMermaDropdown(true)}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+              />
+              {showMermaDropdown && mermaSearch && (
+                <div style={{ position: 'absolute', zIndex: 10, width: '100%', backgroundColor: 'white', border: '1px solid #ccc', maxHeight: '150px', overflowY: 'auto', borderRadius: '6px', marginTop: '5px' }}>
+                  {mermaFiltered.map(p => (
+                    <div key={p.id} onClick={() => { setMermaForm({...mermaForm, productId: p.id}); setMermaSearch(''); setShowMermaDropdown(false); }} style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee' }}>
+                      {p.name} (Hay: {formatStock(p)})
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div style={{ width: '150px' }}>
-              <input type="number" required value={mermaForm.quantity} onChange={e => setMermaForm({...mermaForm, quantity: e.target.value})} placeholder="Cant." style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Cantidad de Unidades Dañadas</label>
+              <input type="number" required value={mermaForm.quantity} onChange={e => setMermaForm({...mermaForm, quantity: e.target.value})} placeholder="Ej: 5" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             </div>
-            <button type="submit" style={{ padding: '10px 20px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>Reportar</button>
+            <button type="submit" style={{ padding: '15px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>Reportar</button>
           </form>
         </div>
       )}
