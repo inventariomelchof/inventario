@@ -51,9 +51,10 @@ export async function POST(request) {
         barcode: finalBarcode,
         name: data.name,
         unitWeight: parseFloat(data.unitWeight) || 0,
-        totalWeight: 0, // Inicia en 0
-        stock: 0,       // Inicia en 0, se llena en Entradas
-        description: '', // Se deja vacío
+        packageWeight: parseFloat(data.packageWeight) || 0, // <-- PESO PAQUETE
+        totalWeight: 0,
+        stock: 0,
+        description: '',
         categoryId: category.id,
         familyId: family.id,
         brandId: brand.id,
