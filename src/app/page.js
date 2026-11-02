@@ -4,8 +4,6 @@ import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Html5Qrcode } from 'html5-qrcode'
 import * as XLSX from 'xlsx'
-import jsPDF from 'jspdf'
-import 'jspdf-autotable'
 
 export default function Home() {
   const { data: session, status } = useSession()
@@ -14,18 +12,15 @@ export default function Home() {
   const [view, setView] = useState('dashboard')
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(false)
-  
   const [isOnline, setIsOnline] = useState(true)
 
-  // Filtros
+  // Filtros y Productos
   const [searchTerm, setSearchTerm] = useState('')
-
-  // Productos (Sin precio ni stock)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [formData, setFormData] = useState({
     name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas',
-    unitWeight: '', barcode: '', customUnits: []
+    unitWeight: '', packageWeight: '', barcode: '', customUnits: []
   })
 
   // Entradas
@@ -39,8 +34,11 @@ export default function Home() {
   const [exitForm, setExitForm] = useState({ productId: '', packages: '', units: '', reason: 'Venta', deliveredBy: '', receivedBy: '' })
   const [exitSearch, setExitSearch] = useState('')
   const [showExitDropdown, setShowExitDropdown] = useState(false)
+  
+  // Transporte
   const [transportType, setTransportType] = useState('Moto')
-  const [maxWeight, setMaxWeight] = useState(500)
+  const [maxWeight, setMaxWeight] = useState(1500)
+  const [unlimitedWeight, setUnlimitedWeight] = useState(false)
 
   // Mermas
   const [mermaForm, setMermaForm] = useState({ productId: '', quantity: '' })
@@ -133,6 +131,13 @@ export default function Home() {
     return { text: new Date(dateStr).toLocaleDateString(), color: '#10b981', bg: 'transparent' }
   }
 
+  const handleTransportChange = (type) => {
+    setTransportType(type)
+    if (type === 'Moto') { setMaxWeight(1500); setUnlimitedWeight(false) }
+    else if (type === 'Carreta') { setMaxWeight(250); setUnlimitedWeight(false) }
+    else { setMaxWeight(0); setUnlimitedWeight(true) }
+  }
+
   // --- LÓGICA DE PRODUCTOS ---
   const addCustomUnit = () => setFormData({ ...formData, customUnits: [...formData.customUnits, { name: '', multiplier: '', price: 0 }] })
   const updateCustomUnit = (index, field, value) => {
@@ -146,11 +151,10 @@ export default function Home() {
     const method = editingId ? 'PUT' : 'POST'
     
     const fullName = `${formData.name} ${formData.presentation} x${formData.unitsPerPackage}UND (${formData.brand})`.toUpperCase()
-    // Se envía priceUnit: 0 por defecto ya que se quitó del formulario
     const dataToSend = { ...formData, name: fullName, priceUnit: 0 } 
 
     await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataToSend) })
-    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', barcode: '', customUnits: [] })
+    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', packageWeight: '', barcode: '', customUnits: [] })
     setEditingId(null); setShowForm(false); await fetchProducts(); setLoading(false)
   }
 
@@ -163,7 +167,7 @@ export default function Home() {
     setFormData({
       name: product.name, presentation: '', unitsPerPackage: '1', brand: product.brand?.name || '', 
       category: product.category?.name || 'Bebidas', family: product.family?.name || 'Gaseosas',
-      unitWeight: product.unitWeight.toString(), barcode: product.barcode || '', customUnits: custom
+      unitWeight: product.unitWeight.toString(), packageWeight: product.packageWeight?.toString() || '', barcode: product.barcode || '', customUnits: custom
     })
     setEditingId(product.id); setShowForm(true); setView('products')
   }
@@ -222,6 +226,7 @@ export default function Home() {
   const handleExitSubmit = async () => {
     if (cart.length === 0) return alert('La lista está vacía')
     if (!exitForm.deliveredBy || !exitForm.receivedBy) return alert('Complete quién entrega y quién recibe')
+    if (!unlimitedWeight && totalWeight > maxWeight) return alert('El peso excede el límite permitido')
     
     setLoading(true)
     const items = cart.map(c => ({ productId: c.id, quantity: c.quantity }))
@@ -273,31 +278,14 @@ export default function Home() {
     setLoading(false)
   }
 
-  // --- EXPORTACIONES ---
-  const exportProductsToExcel = () => {
-    const dataToExport = filteredProducts.map(p => ({
-      'Código': p.internalCode, 'Producto': p.name, 'Marca': p.brand?.name || '-', 'Stock': formatStock(p)
-    }))
-    const ws = XLSX.utils.json_to_sheet(dataToExport); const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Inventario"); XLSX.writeFile(wb, "Inventario.xlsx")
-  }
-  const exportKardexToExcel = () => {
-    const dataToExport = kardex.map(m => ({
-      'Fecha': new Date(m.createdAt).toLocaleString(), 'Producto': m.product?.name || '-', 'Tipo': m.type, 'Cantidad': m.quantity, 'Stock Final': m.newStock
-    }))
-    const ws = XLSX.utils.json_to_sheet(dataToExport); const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, "Kardex"); XLSX.writeFile(wb, "Kardex.xlsx")
-  }
-
   const totalWeight = cart.reduce((sum, item) => sum + item.weight, 0)
-  const excedePeso = totalWeight > maxWeight
+  const excedePeso = !unlimitedWeight && totalWeight > maxWeight
 
   const filteredProducts = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.barcode && p.barcode.includes(searchTerm));
     return matchSearch;
   });
 
-  // Filtros para buscadores inteligentes
   const entryFiltered = products.filter(p => p.name.toLowerCase().includes(entrySearch.toLowerCase()));
   const exitFiltered = products.filter(p => p.name.toLowerCase().includes(exitSearch.toLowerCase()));
   const mermaFiltered = products.filter(p => p.name.toLowerCase().includes(mermaSearch.toLowerCase()));
@@ -351,13 +339,15 @@ export default function Home() {
           </div>
           <input type="text" placeholder="🔍 Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ccc' }} />
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}><th style={{padding:'10px'}}>Producto</th><th style={{padding:'10px'}}>Vence</th><th style={{padding:'10px'}}>Stock</th><th style={{padding:'10px'}}>Acciones</th></tr></thead>
+            <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}><th style={{padding:'10px'}}>Producto</th><th style={{padding:'10px'}}>Peso Und</th><th style={{padding:'10px'}}>Peso Paq</th><th style={{padding:'10px'}}>Vence</th><th style={{padding:'10px'}}>Stock</th><th style={{padding:'10px'}}>Acciones</th></tr></thead>
             <tbody>
               {filteredProducts.map(p => {
                 const exp = getExpirationAlert(p.expirationDate);
                 return (
                   <tr key={p.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                     <td style={{ padding: '12px', fontWeight: 'bold' }}>{p.name}</td>
+                    <td style={{ padding: '12px' }}>{p.unitWeight} kg</td>
+                    <td style={{ padding: '12px' }}>{p.packageWeight ? p.packageWeight + ' kg' : '-'}</td>
                     <td style={{ padding: '12px' }}><span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '12px', color: exp.color, backgroundColor: exp.bg }}>{exp.text}</span></td>
                     <td style={{ padding: '12px', color: '#2563eb', fontWeight: 'bold' }}>{formatStock(p)}</td>
                     <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
@@ -396,7 +386,30 @@ export default function Home() {
               Vista Previa: {formData.name || 'Nombre'} {formData.presentation || 'Medida'} x{formData.unitsPerPackage || '0'}UND ({formData.brand || 'Marca'})
             </div>
 
-            <input type="number" step="0.01" required value={formData.unitWeight} onChange={e => setFormData({...formData, unitWeight: e.target.value})} placeholder="Peso 1 unidad (kg)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Peso 1 Unidad (kg)</label>
+              <input type="number" step="0.01" required value={formData.unitWeight} onChange={e => setFormData({...formData, unitWeight: e.target.value})} placeholder="Ej: 0.35" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Peso 1 Paquete (kg)</label>
+              <input type="number" step="0.01" value={formData.packageWeight} onChange={e => setFormData({...formData, packageWeight: e.target.value})} placeholder="Ej: 2.1" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            </div>
+
+            {/* AGREGAR UNIDADES DE MEDIDA (Cajas, Displays, etc) */}
+            <div style={{ gridColumn: 'span 2', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px', marginTop: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{ margin: 0, fontSize: '16px' }}>Presentaciones Adicionales (Caja, Fardo, etc.)</h3>
+                <button type="button" onClick={addCustomUnit} style={{ padding: '6px 12px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px' }}>+ Añadir Presentación</button>
+              </div>
+              {formData.customUnits.map((unit, index) => (
+                <div key={index} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
+                  <input type="text" required value={unit.name} onChange={e => updateCustomUnit(index, 'name', e.target.value)} placeholder="Nombre (Ej: Caja, Display)" style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                  <input type="number" required value={unit.multiplier} onChange={e => updateCustomUnit(index, 'multiplier', e.target.value)} placeholder="Unidades que trae" style={{ width: '150px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                  <button type="button" onClick={() => removeCustomUnit(index)} style={{ padding: '8px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>X</button>
+                </div>
+              ))}
+              {formData.customUnits.length === 0 && <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>Si el producto solo se maneja por paquete y unidad, deja esto vacío.</p>}
+            </div>
             
             <button type="submit" disabled={loading} style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', marginTop: '10px' }}>Guardar Producto</button>
             <button type="button" onClick={() => setShowForm(false)} style={{ gridColumn: 'span 2', padding: '10px', backgroundColor: 'transparent', color: '#6b7280', border: 'none', cursor: 'pointer' }}>Cancelar</button>
@@ -409,10 +422,8 @@ export default function Home() {
           <h2>Registrar Entrada</h2>
           <form onSubmit={handleEntrySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
             
-            {/* BUSCADOR INTELIGENTE */}
             <div style={{ position: 'relative' }}>
-              <input 
-                type="text" placeholder="Buscar producto..." 
+              <input type="text" placeholder="Buscar producto..." 
                 value={entryForm.productId ? products.find(p=>p.id===entryForm.productId)?.name : entrySearch} 
                 onChange={e => { setEntrySearch(e.target.value); setEntryForm({...entryForm, productId: ''}); setShowEntryDropdown(true); }}
                 onFocus={() => setShowEntryDropdown(true)}
@@ -456,20 +467,18 @@ export default function Home() {
             <h2>🚚 Preparar Salida</h2>
             
             <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                <select value={transportType} onChange={e => setTransportType(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
-                    <option value="Moto">Motocarga</option>
-                    <option value="Carreta">Carreta</option>
-                    <option value="Propio">Propio (Mano)</option>
+                <select value={transportType} onChange={e => handleTransportChange(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
+                    <option value="Moto">Motocarga (Max 1500kg)</option>
+                    <option value="Carreta">Carreta (Max 250kg)</option>
+                    <option value="A mano">A mano (Sin límite)</option>
                 </select>
-                <input type="number" value={maxWeight} onChange={e => setMaxWeight(e.target.value)} placeholder="Peso max (kg)" style={{ width: '120px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+                <input type="number" value={maxWeight} disabled={unlimitedWeight} onChange={e => setMaxWeight(e.target.value)} placeholder="Peso max (kg)" style={{ width: '120px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: unlimitedWeight ? '#eee' : 'white' }} />
             </div>
 
             <form onSubmit={addToCart} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               
-              {/* BUSCADOR INTELIGENTE */}
               <div style={{ position: 'relative' }}>
-                <input 
-                  type="text" placeholder="Buscar producto..." 
+                <input type="text" placeholder="Buscar producto..." 
                   value={exitForm.productId ? products.find(p=>p.id===exitForm.productId)?.name : exitSearch} 
                   onChange={e => { setExitSearch(e.target.value); setExitForm({...exitForm, productId: ''}); setShowExitDropdown(true); }}
                   onFocus={() => setShowExitDropdown(true)}
@@ -516,7 +525,7 @@ export default function Home() {
               ))}
             </ul>
             <div style={{ marginTop: '20px', padding: '15px', backgroundColor: excedePeso ? '#fee2e2' : '#f3f4f6', borderRadius: '8px' }}>
-              <p style={{ margin: 0, fontWeight: 'bold' }}>Peso Total: {totalWeight.toFixed(2)} kg (Max: {maxWeight} kg)</p>
+              <p style={{ margin: 0, fontWeight: 'bold' }}>Peso Total: {totalWeight.toFixed(2)} kg {unlimitedWeight ? '(Sin límite)' : `(Max: ${maxWeight} kg)`}</p>
               {excedePeso && <p style={{ margin: '5px 0 0 0', color: '#b91c1c', fontWeight: 'bold', fontSize: '14px' }}>⚠️ ¡EXCEDE EL PESO PERMITIDO!</p>}
             </div>
             {cart.length > 0 && (
@@ -535,10 +544,8 @@ export default function Home() {
           <h2>⚠️ Reportar Merma</h2>
           <form onSubmit={handleMermaSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
             
-            {/* BUSCADOR INTELIGENTE */}
             <div style={{ position: 'relative' }}>
-              <input 
-                type="text" placeholder="Buscar producto..." 
+              <input type="text" placeholder="Buscar producto..." 
                 value={mermaForm.productId ? products.find(p=>p.id===mermaForm.productId)?.name : mermaSearch} 
                 onChange={e => { setMermaSearch(e.target.value); setMermaForm({...mermaForm, productId: ''}); setShowMermaDropdown(true); }}
                 onFocus={() => setShowMermaDropdown(true)}
@@ -568,20 +575,26 @@ export default function Home() {
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
             <h2 style={{ margin: 0 }}>Kardex</h2>
-            <button onClick={exportKardexToExcel} style={{ padding: '10px 15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>📥 Excel</button>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}><th style={{padding:'10px'}}>Fecha</th><th style={{padding:'10px'}}>Producto</th><th style={{padding:'10px'}}>Tipo</th><th style={{padding:'10px'}}>Cant.</th><th style={{padding:'10px'}}>Stock Final</th></tr></thead>
+            <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}><th style={{padding:'10px'}}>Fecha</th><th style={{padding:'10px'}}>Producto</th><th style={{padding:'10px'}}>Tipo</th><th style={{padding:'10px'}}>Movimiento</th><th style={{padding:'10px'}}>Stock Final</th></tr></thead>
             <tbody>
-              {kardex.map(m => (
-                <tr key={m.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                  <td style={{ padding: '10px', fontSize: '12px' }}>{new Date(m.createdAt).toLocaleString()}</td>
-                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{m.product?.name}</td>
-                  <td style={{ padding: '10px' }}><span style={{ padding: '4px', borderRadius: '4px', backgroundColor: m.type === 'ENTRADA' ? '#d1fae5' : '#fee2e2', color: m.type === 'ENTRADA' ? '#065f46' : '#991b1b' }}>{m.type}</span></td>
-                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{m.quantity}</td>
-                  <td style={{ padding: '10px', fontWeight: 'bold', color: '#2563eb' }}>{m.newStock}</td>
-                </tr>
-              ))}
+              {kardex.map(m => {
+                const movFormatted = formatStock({ stock: m.quantity, units: m.product?.units });
+                const stockFormatted = formatStock({ stock: m.newStock, units: m.product?.units });
+                
+                return (
+                  <tr key={m.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                    <td style={{ padding: '10px', fontSize: '12px' }}>{new Date(m.createdAt).toLocaleString()}</td>
+                    <td style={{ padding: '10px', fontWeight: 'bold' }}>{m.product?.name}</td>
+                    <td style={{ padding: '10px' }}><span style={{ padding: '4px', borderRadius: '4px', backgroundColor: m.type === 'ENTRADA' ? '#d1fae5' : '#fee2e2', color: m.type === 'ENTRADA' ? '#065f46' : '#991b1b' }}>{m.type}</span></td>
+                    <td style={{ padding: '10px', fontWeight: 'bold', color: m.type === 'ENTRADA' ? '#059669' : '#dc2626' }}>
+                      {m.type === 'ENTRADA' ? '+' : '-'} {movFormatted}
+                    </td>
+                    <td style={{ padding: '10px', fontWeight: 'bold', color: '#2563eb' }}>{stockFormatted}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
