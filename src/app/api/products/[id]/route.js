@@ -15,7 +15,6 @@ export async function PUT(request, { params }) {
   try {
     const data = await request.json()
 
-    // Si es solo para descontinuar/activar
     if (data.toggleOnly) {
         const product = await prisma.product.update({
             where: { id: params.id },
@@ -24,7 +23,6 @@ export async function PUT(request, { params }) {
         return NextResponse.json(product)
     }
     
-    // Si es edición completa
     await prisma.productUnit.deleteMany({ where: { productId: params.id } })
 
     const catName = data.category.trim().toUpperCase();
@@ -56,9 +54,10 @@ export async function PUT(request, { params }) {
       finalBarcode = `200${randomPart}`;
     }
 
-    let weightInKg = parseFloat(data.weightValue) || 0;
-    if (data.weightUnit === 'ml' || data.weightUnit === 'g') weightInKg = weightInKg / 1000;
-    
+    const packageWeight = parseFloat(data.packageWeight) || 0;
+    const units = parseInt(data.unitsPerPackage) || 1;
+    const unitWeight = packageWeight / units; 
+
     const generatedName = `${data.name} x${data.unitsPerPackage}UND (${data.brand})`.toUpperCase()
 
     const product = await prisma.product.update({
@@ -67,8 +66,8 @@ export async function PUT(request, { params }) {
         name: generatedName,
         description: generatedName,
         barcode: finalBarcode,
-        unitWeight: weightInKg,
-        packageWeight: weightInKg * (parseInt(data.unitsPerPackage) || 1),
+        unitWeight: unitWeight,
+        packageWeight: packageWeight,
         categoryId: category.id,
         familyId: family.id,
         brandId: brand.id,

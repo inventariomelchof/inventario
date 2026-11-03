@@ -430,17 +430,12 @@ export default function Home() {
                 ))}
               </datalist>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <input type="number" step="0.01" required value={formData.weightValue} 
-                onChange={e => setFormData({...formData, weightValue: e.target.value})} 
-                placeholder="Peso (Ej: 625)" 
-                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-              <select value={formData.weightUnit} onChange={e => setFormData({...formData, weightUnit: e.target.value})} style={{ width: '80px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
-                <option value="ml">ml</option>
-                <option value="L">L</option>
-                <option value="g">g</option>
-                <option value="kg">kg</option>
-              </select>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Peso Total del Paquete (kg)</label>
+              <input type="number" step="0.01" required value={formData.packageWeight} 
+                onChange={e => setFormData({...formData, packageWeight: e.target.value})} 
+                placeholder="Ej: 15" 
+                style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             </div>
 
             <div style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#e0f2fe', borderRadius: '8px', border: '1px solid #bae6fd' }}>
@@ -448,11 +443,10 @@ export default function Home() {
               <p style={{ margin: '0 0 10px 0', fontSize: '18px', fontWeight: 'bold', color: '#0284c7' }}>
                 {formData.name || 'NOMBRE'} x{formData.unitsPerPackage || '0'}UND ({formData.brand || 'MARCA'})
               </p>
-              <p style={{ margin: 0, fontSize: '14px', color: '#0369a1', fontWeight: 'bold' }}>⚖️ Peso total calculado:</p>
+                            <p style={{ margin: 0, fontSize: '14px', color: '#0369a1', fontWeight: 'bold' }}>⚖️ Cálculo de Peso:</p>
               <p style={{ margin: 0, fontSize: '16px', color: '#0284c7' }}>
-                {formData.weightValue && formData.unitsPerPackage 
-                  ? `${((parseFloat(formData.weightValue) * (['ml', 'g'].includes(formData.weightUnit) ? 0.001 : 1)) * parseInt(formData.unitsPerPackage)).toFixed(3)} kg`
-                  : '0 kg'}
+                Paquete: {formData.packageWeight || 0} kg | 
+                Unidad: {formData.packageWeight && formData.unitsPerPackage ? (parseFloat(formData.packageWeight) / parseInt(formData.unitsPerPackage)).toFixed(2) : 0} kg
               </p>
             </div>
 
