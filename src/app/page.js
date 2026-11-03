@@ -418,15 +418,18 @@ export default function Home() {
               placeholder="Marca (Ej: AJEPER)" 
               style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
 
-            <select required value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
-              <option value="">Seleccione Categoría...</option>
-              <option value="Bebidas">Bebidas</option>
-              <option value="Golosinas">Golosinas</option>
-              <option value="Abarrotes">Abarrotes</option>
-              <option value="Limpieza">Limpieza</option>
-              <option value="Otros">Otros</option>
-            </select>
-
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Categoría (Escribe o selecciona)</label>
+              <input type="text" required list="category-list" value={formData.category} 
+                onChange={e => setFormData({...formData, category: e.target.value.toUpperCase()})} 
+                placeholder="Ej: BEBIDAS" 
+                style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+              <datalist id="category-list">
+                {[...new Set(products.map(p => p.category?.name))].filter(Boolean).map(cat => (
+                  <option key={cat} value={cat} />
+                ))}
+              </datalist>
+            </div>
             <div style={{ display: 'flex', gap: '10px' }}>
               <input type="number" step="0.01" required value={formData.weightValue} 
                 onChange={e => setFormData({...formData, weightValue: e.target.value})} 

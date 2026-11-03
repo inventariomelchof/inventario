@@ -14,16 +14,40 @@ export async function DELETE(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     const data = await request.json()
+
+    // Si es solo para descontinuar/activar
+    if (data.toggleOnly) {
+        const product = await prisma.product.update({
+            where: { id: params.id },
+            data: { isActive: data.isActive }
+        })
+        return NextResponse.json(product)
+    }
     
+    // Si es edición completa
     await prisma.productUnit.deleteMany({ where: { productId: params.id } })
 
-    const unitsToCreate = [{ name: 'Unidad', multiplier: 1, price: parseFloat(data.priceUnit) || 0 }]
+    const catName = data.category.trim().toUpperCase();
+    let category = await prisma.category.findFirst({ where: { name: { equals: catName, mode: 'insensitive' } } })
+    if (!category) category = await prisma.category.create({ data: { name: catName } })
+
+    let family = await prisma.family.findFirst({ where: { categoryId: category.id } })
+    if (!family) family = await prisma.family.create({ data: { name: 'GENERAL', categoryId: category.id } })
+
+    const brandName = data.brand.trim().toUpperCase();
+    let brand = await prisma.brand.findFirst({ where: { name: { equals: brandName, mode: 'insensitive' } } })
+    if (!brand) brand = await prisma.brand.create({ data: { name: brandName } })
+
+    const unitsToCreate = [{ name: 'Unidad', multiplier: 1, price: 0 }]
     if (data.customUnits && data.customUnits.length > 0) {
       data.customUnits.forEach(u => {
         if (u.name && parseInt(u.multiplier) > 1) {
-          unitsToCreate.push({ name: u.name, multiplier: parseInt(u.multiplier), price: parseFloat(u.price) || 0 })
+          unitsToCreate.push({ name: u.name.toUpperCase(), multiplier: parseInt(u.multiplier), price: 0 })
         }
       })
+    }
+    if (parseInt(data.unitsPerPackage) > 1) {
+        unitsToCreate.push({ name: 'Paquete', multiplier: parseInt(data.unitsPerPackage), price: 0 })
     }
 
     let finalBarcode = data.barcode;
@@ -32,22 +56,28 @@ export async function PUT(request, { params }) {
       finalBarcode = `200${randomPart}`;
     }
 
+    let weightInKg = parseFloat(data.weightValue) || 0;
+    if (data.weightUnit === 'ml' || data.weightUnit === 'g') weightInKg = weightInKg / 1000;
+    
+    const generatedName = `${data.name} x${data.unitsPerPackage}UND (${data.brand})`.toUpperCase()
+
     const product = await prisma.product.update({
       where: { id: params.id },
       data: {
-        name: data.name,
+        name: generatedName,
+        description: generatedName,
         barcode: finalBarcode,
-        unitWeight: parseFloat(data.unitWeight) || 0,
-        packageWeight: parseFloat(data.packageWeight) || 0, // <-- PESO PAQUETE
-        totalWeight: (parseFloat(data.unitWeight) || 0) * (parseInt(data.stock) || 0),
-        stock: parseInt(data.stock) || 0,
-        expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
+        unitWeight: weightInKg,
+        packageWeight: weightInKg * (parseInt(data.unitsPerPackage) || 1),
+        categoryId: category.id,
+        familyId: family.id,
+        brandId: brand.id,
         units: { create: unitsToCreate }
       }
     })
     return NextResponse.json(product)
   } catch (error) {
     console.error(error)
-    return NextResponse.json({ error: 'Error al editar' }, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
