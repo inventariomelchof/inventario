@@ -18,9 +18,11 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
+  
+  // Formulario de Productos adaptado a la nueva lógica
   const [formData, setFormData] = useState({
-    name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas',
-    unitWeight: '', packageWeight: '', barcode: '', customUnits: []
+    name: '', unitsPerPackage: '', brand: '', category: 'Bebidas', 
+    weightValue: '', weightUnit: 'ml', barcode: '', customUnits: []
   })
 
   // Entradas
@@ -150,24 +152,39 @@ export default function Home() {
     const url = editingId ? `/api/products/${editingId}` : '/api/products'
     const method = editingId ? 'PUT' : 'POST'
     
-    const fullName = `${formData.name} ${formData.presentation} x${formData.unitsPerPackage}UND (${formData.brand})`.toUpperCase()
-    const dataToSend = { ...formData, name: fullName, priceUnit: 0 } 
-
-    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataToSend) })
-    setFormData({ name: '', presentation: '', unitsPerPackage: '', brand: '', category: 'Bebidas', family: 'Gaseosas', unitWeight: '', packageWeight: '', barcode: '', customUnits: [] })
+    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) })
+    
+    setFormData({ name: '', unitsPerPackage: '', brand: '', category: 'Bebidas', weightValue: '', weightUnit: 'ml', barcode: '', customUnits: [] })
     setEditingId(null); setShowForm(false); await fetchProducts(); setLoading(false)
   }
 
   const handleDelete = async (id) => {
-    if(confirm('¿Eliminar producto?')) { await fetch(`/api/products/${id}`, { method: 'DELETE' }); await fetchProducts() }
+    if(confirm('¿Eliminar producto permanentemente?')) { await fetch(`/api/products/${id}`, { method: 'DELETE' }); await fetchProducts() }
+  }
+
+  const toggleProductStatus = async (id, currentStatus) => {
+    const action = currentStatus ? 'descontinuar' : 'activar'
+    if(confirm(`¿Estás seguro de ${action} este producto?`)) {
+        await fetch(`/api/products/${id}`, { 
+            method: 'PUT', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ isActive: !currentStatus, toggleOnly: true }) 
+        })
+        await fetchProducts()
+    }
   }
 
   const handleEdit = (product) => {
-    const custom = product.units?.filter(u => u.name !== 'Unidad').map(u => ({ name: u.name, multiplier: u.multiplier.toString(), price: 0 })) || []
+    // Lógica para rellenar el formulario al editar
     setFormData({
-      name: product.name, presentation: '', unitsPerPackage: '1', brand: product.brand?.name || '', 
-      category: product.category?.name || 'Bebidas', family: product.family?.name || 'Gaseosas',
-      unitWeight: product.unitWeight.toString(), packageWeight: product.packageWeight?.toString() || '', barcode: product.barcode || '', customUnits: custom
+      name: product.name.split(' X')[0] || '', // Intenta extraer el nombre base
+      unitsPerPackage: product.units?.[0]?.multiplier.toString() || '', // Toma la primera unidad como referencia
+      brand: product.brand?.name || '', 
+      category: product.category?.name || 'Bebidas',
+      weightValue: (product.unitWeight * (product.unitWeight < 1 ? 1000 : 1)).toString(), // Revertir a ml o g si es menor a 1kg
+      weightUnit: product.unitWeight < 1 ? 'ml' : 'kg',
+      barcode: product.barcode || '', 
+      customUnits: product.units?.filter(u => u.name !== 'Unidad' && u.name !== 'Paquete').map(u => ({ name: u.name, multiplier: u.multiplier.toString() })) || []
     })
     setEditingId(product.id); setShowForm(true); setView('products')
   }
@@ -178,7 +195,7 @@ export default function Home() {
     const product = products.find(p => p.id === entryForm.productId)
     if (!product) return alert('Seleccione un producto')
     
-    const multiplier = product.unitsPerPackage || 1;
+    const multiplier = product.units?.find(u => u.name === 'Paquete')?.multiplier || 1;
     const totalUnits = (parseInt(entryForm.packages || 0) * multiplier) + parseInt(entryForm.units || 0);
     if (totalUnits <= 0) return alert('Ingrese una cantidad válida');
 
@@ -195,7 +212,7 @@ export default function Home() {
     const product = products.find(p => p.id === exitForm.productId)
     if (!product) return alert('Seleccione un producto')
 
-    const multiplier = product.unitsPerPackage || 1;
+    const multiplier = product.units?.find(u => u.name === 'Paquete')?.multiplier || 1;
     const totalUnits = (parseInt(exitForm.packages || 0) * multiplier) + parseInt(exitForm.units || 0);
 
     if (totalUnits <= 0) return alert('Ingrese una cantidad válida')
@@ -286,12 +303,12 @@ export default function Home() {
     return matchSearch;
   });
 
-  const entryFiltered = products.filter(p => p.name.toLowerCase().includes(entrySearch.toLowerCase()));
-  const exitFiltered = products.filter(p => p.name.toLowerCase().includes(exitSearch.toLowerCase()));
-  const mermaFiltered = products.filter(p => p.name.toLowerCase().includes(mermaSearch.toLowerCase()));
+  const entryFiltered = products.filter(p => p.isActive && p.name.toLowerCase().includes(entrySearch.toLowerCase()));
+  const exitFiltered = products.filter(p => p.isActive && p.name.toLowerCase().includes(exitSearch.toLowerCase()));
+  const mermaFiltered = products.filter(p => p.isActive && p.name.toLowerCase().includes(mermaSearch.toLowerCase()));
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1000px', margin: '0 auto', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1100px', margin: '0 auto', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
       
       {showScanner && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -334,29 +351,39 @@ export default function Home() {
       {view === 'products' && !showForm && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-            <h2 style={{ margin: 0 }}>Catálogo</h2>
-            <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>+ Nuevo</button>
+            <h2 style={{ margin: 0 }}>Catálogo de Productos</h2>
+            <button onClick={() => setShowForm(true)} style={{ padding: '10px 20px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>+ Nuevo Producto</button>
           </div>
-          <input type="text" placeholder="🔍 Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ccc' }} />
+          <input type="text" placeholder="🔍 Buscar por nombre o código..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '15px', borderRadius: '6px', border: '1px solid #ccc' }} />
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}><th style={{padding:'10px'}}>Producto</th><th style={{padding:'10px'}}>Peso Und</th><th style={{padding:'10px'}}>Peso Paq</th><th style={{padding:'10px'}}>Vence</th><th style={{padding:'10px'}}>Stock</th><th style={{padding:'10px'}}>Acciones</th></tr></thead>
+            <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}>
+                <th style={{padding:'10px'}}>Código</th>
+                <th style={{padding:'10px'}}>Producto</th>
+                <th style={{padding:'10px'}}>Peso</th>
+                <th style={{padding:'10px'}}>Stock</th>
+                <th style={{padding:'10px'}}>Estado</th>
+                <th style={{padding:'10px'}}>Acciones</th>
+            </tr></thead>
             <tbody>
-              {filteredProducts.map(p => {
-                const exp = getExpirationAlert(p.expirationDate);
-                return (
-                  <tr key={p.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+              {filteredProducts.map(p => (
+                  <tr key={p.id} style={{ borderBottom: '1px solid #e5e7eb', opacity: p.isActive ? 1 : 0.5 }}>
+                    <td style={{ padding: '12px', fontSize: '12px', fontWeight: 'bold' }}>{p.internalCode}</td>
                     <td style={{ padding: '12px', fontWeight: 'bold' }}>{p.name}</td>
-                    <td style={{ padding: '12px' }}>{p.unitWeight} kg</td>
-                    <td style={{ padding: '12px' }}>{p.packageWeight ? p.packageWeight + ' kg' : '-'}</td>
-                    <td style={{ padding: '12px' }}><span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '12px', color: exp.color, backgroundColor: exp.bg }}>{exp.text}</span></td>
+                    <td style={{ padding: '12px' }}>{p.unitWeight} kg / und</td>
                     <td style={{ padding: '12px', color: '#2563eb', fontWeight: 'bold' }}>{formatStock(p)}</td>
+                    <td style={{ padding: '12px' }}>
+                        <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold', backgroundColor: p.isActive ? '#d1fae5' : '#fee2e2', color: p.isActive ? '#065f46' : '#991b1b' }}>
+                            {p.isActive ? 'ACTIVO' : 'DESCONTINUADO'}
+                        </span>
+                    </td>
                     <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
-                      <button onClick={() => handleEdit(p)} style={{ padding: '6px 12px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px' }}>Editar</button>
-                      <button onClick={() => handleDelete(p.id)} style={{ padding: '6px 12px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px' }}>Borrar</button>
+                      <button onClick={() => handleEdit(p)} style={{ padding: '6px 10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '4px', fontSize: '12px' }}>Editar</button>
+                      <button onClick={() => toggleProductStatus(p.id, p.isActive)} style={{ padding: '6px 10px', backgroundColor: p.isActive ? '#6b7280' : '#10b981', color: 'white', border: 'none', borderRadius: '4px', fontSize: '12px' }}>
+                          {p.isActive ? 'Descontinuar' : 'Activar'}
+                      </button>
                     </td>
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
@@ -364,7 +391,7 @@ export default function Home() {
 
       {view === 'products' && showForm && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
-          <h2>{editingId ? 'Editar' : 'Nuevo Producto'}</h2>
+          <h2>{editingId ? 'Editar Producto' : 'Nuevo Producto'}</h2>
           <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
             
             <div style={{ gridColumn: 'span 2', display: 'flex', gap: '10px' }}>
@@ -376,26 +403,56 @@ export default function Home() {
               <button type="button" onClick={() => { setScanMode('form'); setShowScanner(true); }} style={{ padding: '10px 20px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>📷 Escanear</button>
             </div>
 
-            <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Nombre Base (Ej: Agua Cielo)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-            <input type="text" required value={formData.presentation} onChange={e => setFormData({...formData, presentation: e.target.value})} placeholder="Medida/Peso (Ej: 2.5L)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            <input type="text" required value={formData.name} 
+              onChange={e => setFormData({...formData, name: e.target.value.toUpperCase()})} 
+              placeholder="Nombre Base (Ej: AGUA CIELO)" 
+              style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             
-            <input type="number" required value={formData.unitsPerPackage} onChange={e => setFormData({...formData, unitsPerPackage: e.target.value})} placeholder="Unidades por Paquete (Ej: 6)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-            <input type="text" required value={formData.brand} onChange={e => setFormData({...formData, brand: e.target.value})} placeholder="Marca (Ej: Ajeper)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            <input type="number" required value={formData.unitsPerPackage} 
+              onChange={e => setFormData({...formData, unitsPerPackage: e.target.value})} 
+              placeholder="Unidades que trae el paquete (Ej: 15)" 
+              style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            
+            <input type="text" required value={formData.brand} 
+              onChange={e => setFormData({...formData, brand: e.target.value.toUpperCase()})} 
+              placeholder="Marca (Ej: AJEPER)" 
+              style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
 
-            <div style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#e0f2fe', borderRadius: '8px', textAlign: 'center', fontWeight: 'bold', fontSize: '18px', color: '#0369a1' }}>
-              Vista Previa: {formData.name || 'Nombre'} {formData.presentation || 'Medida'} x{formData.unitsPerPackage || '0'}UND ({formData.brand || 'Marca'})
+            <select required value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
+              <option value="">Seleccione Categoría...</option>
+              <option value="Bebidas">Bebidas</option>
+              <option value="Golosinas">Golosinas</option>
+              <option value="Abarrotes">Abarrotes</option>
+              <option value="Limpieza">Limpieza</option>
+              <option value="Otros">Otros</option>
+            </select>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <input type="number" step="0.01" required value={formData.weightValue} 
+                onChange={e => setFormData({...formData, weightValue: e.target.value})} 
+                placeholder="Peso (Ej: 625)" 
+                style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+              <select value={formData.weightUnit} onChange={e => setFormData({...formData, weightUnit: e.target.value})} style={{ width: '80px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
+                <option value="ml">ml</option>
+                <option value="L">L</option>
+                <option value="g">g</option>
+                <option value="kg">kg</option>
+              </select>
             </div>
 
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Peso 1 Unidad (kg)</label>
-              <input type="number" step="0.01" required value={formData.unitWeight} onChange={e => setFormData({...formData, unitWeight: e.target.value})} placeholder="Ej: 0.35" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Peso 1 Paquete (kg)</label>
-              <input type="number" step="0.01" value={formData.packageWeight} onChange={e => setFormData({...formData, packageWeight: e.target.value})} placeholder="Ej: 2.1" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            <div style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#e0f2fe', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+              <p style={{ margin: '0 0 5px 0', fontSize: '14px', color: '#0369a1', fontWeight: 'bold' }}>📝 Descripción generada automáticamente:</p>
+              <p style={{ margin: '0 0 10px 0', fontSize: '18px', fontWeight: 'bold', color: '#0284c7' }}>
+                {formData.name || 'NOMBRE'} x{formData.unitsPerPackage || '0'}UND ({formData.brand || 'MARCA'})
+              </p>
+              <p style={{ margin: 0, fontSize: '14px', color: '#0369a1', fontWeight: 'bold' }}>⚖️ Peso total calculado:</p>
+              <p style={{ margin: 0, fontSize: '16px', color: '#0284c7' }}>
+                {formData.weightValue && formData.unitsPerPackage 
+                  ? `${((parseFloat(formData.weightValue) * (['ml', 'g'].includes(formData.weightUnit) ? 0.001 : 1)) * parseInt(formData.unitsPerPackage)).toFixed(3)} kg`
+                  : '0 kg'}
+              </p>
             </div>
 
-            {/* AGREGAR UNIDADES DE MEDIDA (Cajas, Displays, etc) */}
             <div style={{ gridColumn: 'span 2', backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px', marginTop: '10px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <h3 style={{ margin: 0, fontSize: '16px' }}>Presentaciones Adicionales (Caja, Fardo, etc.)</h3>
@@ -403,12 +460,11 @@ export default function Home() {
               </div>
               {formData.customUnits.map((unit, index) => (
                 <div key={index} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center' }}>
-                  <input type="text" required value={unit.name} onChange={e => updateCustomUnit(index, 'name', e.target.value)} placeholder="Nombre (Ej: Caja, Display)" style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                  <input type="text" required value={unit.name} onChange={e => updateCustomUnit(index, 'name', e.target.value.toUpperCase())} placeholder="Nombre (Ej: CAJA)" style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} />
                   <input type="number" required value={unit.multiplier} onChange={e => updateCustomUnit(index, 'multiplier', e.target.value)} placeholder="Unidades que trae" style={{ width: '150px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} />
                   <button type="button" onClick={() => removeCustomUnit(index)} style={{ padding: '8px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>X</button>
                 </div>
               ))}
-              {formData.customUnits.length === 0 && <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>Si el producto solo se maneja por paquete y unidad, deja esto vacío.</p>}
             </div>
             
             <button type="submit" disabled={loading} style={{ gridColumn: 'span 2', padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', marginTop: '10px' }}>Guardar Producto</button>

@@ -87,6 +87,7 @@ model Product {
   name            String
   description     String?
   expirationDate  DateTime?
+  isActive        Boolean   @default(true) // <-- NUEVO CAMPO PARA DESCONTINUAR
   
   categoryId      String
   familyId        String
@@ -96,7 +97,7 @@ model Product {
   brand           Brand     @relation(fields: [brandId], references: [id])
   
   unitWeight      Float
-  packageWeigth   Float?
+  packageWeight   Float?
   totalWeight     Float
   stock           Int       @default(0)
   minStock        Int       @default(5)
@@ -105,8 +106,8 @@ model Product {
   units           ProductUnit[]
   movements       KardexMovement[]
   pickItems       PickListItem[]
-  entries         EntryItem[] // <-- LÍNEA AGREGADA
-  exits           ExitItem[]  // <-- LÍNEA AGREGADA
+  entries         EntryItem[]
+  exits           ExitItem[]
   createdAt       DateTime  @default(now())
 }
 
