@@ -87,7 +87,7 @@ model Product {
   name            String
   description     String?
   expirationDate  DateTime?
-  isActive        Boolean   @default(true) // <-- NUEVO CAMPO PARA DESCONTINUAR
+  isActive        Boolean   @default(true)
   
   categoryId      String
   familyId        String
