@@ -19,20 +19,13 @@ export default function Home() {
   // Filtros
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Formulario de Productos (Nueva Lógica)
+  // Formulario de Productos
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [formData, setFormData] = useState({
-    barcode: '', 
-    name: '', 
-    presentation: '', 
-    packageName: 'PAQUETE',
-    packageUnits: '', 
-    packageWeight: '', 
-    weightUnit: 'g', 
-    categoryId: '', 
-    brandId: '',
-    customUnits: []
+    barcode: '', name: '', presentation: '', 
+    packageName: 'PAQUETE', packageUnits: '', packageWeight: '', weightUnit: 'g', 
+    categoryId: '', brandId: '', customUnits: []
   })
 
   // Crear Categorías/Marcas
@@ -41,10 +34,13 @@ export default function Home() {
 
   // Entradas y Salidas
   const [entryForm, setEntryForm] = useState({ productId: '', packages: '', units: '', expirationDate: '' })
+  const [entrySearch, setEntrySearch] = useState('')
   const [exitForm, setExitForm] = useState({ productId: '', packages: '', units: '', reason: 'Venta', deliveredBy: '', receivedBy: '' })
+  const [exitSearch, setExitSearch] = useState('')
   const [cart, setCart] = useState([])
   const [transportType, setTransportType] = useState('Moto')
   const [maxWeight, setMaxWeight] = useState(1500)
+  const [unlimitedWeight, setUnlimitedWeight] = useState(false)
 
   // Escáner
   const [showScanner, setShowScanner] = useState(false)
@@ -95,6 +91,13 @@ export default function Home() {
   if (status === 'loading') return <div style={{ padding: '50px', textAlign: 'center' }}>Cargando sistema...</div>
   if (status === 'unauthenticated') return null
 
+  const handleTransportChange = (type) => {
+    setTransportType(type)
+    if (type === 'Moto') { setMaxWeight(1500); setUnlimitedWeight(false) }
+    else if (type === 'Carreta') { setMaxWeight(250); setUnlimitedWeight(false) }
+    else { setMaxWeight(0); setUnlimitedWeight(true) }
+  }
+
   // --- GESTIÓN DE CATEGORÍAS Y MARCAS ---
   const handleAddCategory = async (e) => {
     e.preventDefault()
@@ -137,7 +140,7 @@ export default function Home() {
   const handleEdit = (product) => {
     setFormData({
       barcode: product.barcode || '',
-      name: product.name.split(' ')[0], // Aproximación
+      name: product.name.split(' ')[0],
       presentation: '',
       packageName: product.units?.find(u => u.name !== 'Unidad')?.name || 'PAQUETE',
       packageUnits: product.units?.find(u => u.name !== 'Unidad')?.multiplier.toString() || '',
@@ -157,6 +160,96 @@ export default function Home() {
   let pesoEmpaqueKg = parseFloat(formData.packageWeight) || 0;
   if (formData.weightUnit === 'g') pesoEmpaqueKg = pesoEmpaqueKg / 1000;
   const pesoUnidadKg = (pesoEmpaqueKg / (parseInt(formData.packageUnits) || 1));
+
+  // --- LÓGICA DE ENTRADAS ---
+  const handleEntrySubmit = async (e) => {
+    e.preventDefault(); setLoading(true)
+    const product = products.find(p => p.id === entryForm.productId)
+    if (!product) return alert('Seleccione un producto')
+    
+    const multiplier = product.units?.find(u => u.multiplier > 1)?.multiplier || 1;
+    const totalUnits = (parseInt(entryForm.packages || 0) * multiplier) + parseInt(entryForm.units || 0);
+    if (totalUnits <= 0) return alert('Ingrese una cantidad válida');
+
+    const dataToSend = { productId: entryForm.productId, quantity: totalUnits, expirationDate: entryForm.expirationDate || null };
+
+    await fetch('/api/entries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dataToSend) })
+    setEntryForm({ productId: '', packages: '', units: '', expirationDate: '' }); setEntrySearch('');
+    await fetchData(); setLoading(false); setView('kardex')
+  }
+
+  // --- LÓGICA DE SALIDAS ---
+  const addToCart = (e) => {
+    e.preventDefault()
+    const product = products.find(p => p.id === exitForm.productId)
+    if (!product) return alert('Seleccione un producto')
+
+    const multiplier = product.units?.find(u => u.multiplier > 1)?.multiplier || 1;
+    const totalUnits = (parseInt(exitForm.packages || 0) * multiplier) + parseInt(exitForm.units || 0);
+
+    if (totalUnits <= 0) return alert('Ingrese una cantidad válida')
+    const alreadyInCart = cart.find(c => c.id === product.id)?.quantity || 0;
+    if ((totalUnits + alreadyInCart) > product.stock) return alert(`Stock insuficiente. Solo hay ${product.stock}`)
+
+    const existingIndex = cart.findIndex(c => c.id === product.id);
+    if(existingIndex >= 0) {
+        const newCart = [...cart];
+        newCart[existingIndex].quantity += totalUnits;
+        newCart[existingIndex].weight = newCart[existingIndex].quantity * product.unitWeight;
+        setCart(newCart);
+    } else {
+        setCart([...cart, { id: product.id, name: product.name, quantity: totalUnits, weight: product.unitWeight * totalUnits, unitWeight: product.unitWeight }])
+    }
+    
+    setExitForm({ ...exitForm, productId: '', packages: '', units: '' });
+    setExitSearch('');
+  }
+
+  const updateCartQuantity = (id, newQuantity) => {
+    if (newQuantity <= 0) return;
+    setCart(cart.map(c => c.id === id ? { ...c, quantity: newQuantity, weight: newQuantity * c.unitWeight } : c));
+  }
+
+  const removeFromCart = (id) => { setCart(cart.filter(c => c.id !== id)); }
+
+  const handleExitSubmit = async () => {
+    if (cart.length === 0) return alert('La lista está vacía')
+    if (!exitForm.deliveredBy || !exitForm.receivedBy) return alert('Complete quién entrega y quién recibe')
+    if (!unlimitedWeight && totalWeight > maxWeight) return alert('El peso excede el límite permitido')
+    
+    setLoading(true)
+    const items = cart.map(c => ({ productId: c.id, quantity: c.quantity }))
+    try {
+      const res = await fetch('/api/exits', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, reason: exitForm.reason, deliveredBy: exitForm.deliveredBy, receivedBy: exitForm.receivedBy })
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      
+      const ticketHTML = `
+        <html><head><title>Ticket</title><style>body { font-family: 'Courier New', monospace; width: 80mm; margin: 0 auto; padding: 10px; font-size: 12px; } .text-center { text-align: center; } .bold { font-weight: bold; } .line { border-bottom: 1px dashed #000; margin: 5px 0; } table { width: 100%; border-collapse: collapse; } th, td { padding: 2px 0; text-align: left; } th { border-bottom: 1px dashed #000; }</style></head>
+        <body>
+          <div class="text-center bold" style="font-size: 16px;">MI EMPRESA S.A.C.</div><div class="text-center">RUC: 20123456789</div><div class="text-center">TICKET DE SALIDA</div><div class="line"></div>
+          <div>Fecha: ${new Date().toLocaleString()}</div><div>Transporte: ${transportType}</div><div>Entrega: ${exitForm.deliveredBy}</div><div>Recibe: ${exitForm.receivedBy}</div><div class="line"></div>
+          <table><thead><tr><th>Cant.</th><th>Producto</th></tr></thead><tbody>${cart.map(item => `<tr><td class="bold">${item.quantity} und</td><td>${item.name}</td></tr>`).join('')}</tbody></table>
+          <div class="line"></div><div class="bold">Peso Total: ${totalWeight.toFixed(2)} kg</div><div class="line"></div>
+          <div class="text-center" style="margin-top: 10px;">_______________________</div><div class="text-center">Firma de Recepción</div>
+        </body></html>
+      `;
+      const printWindow = window.open('', '_blank'); printWindow.document.write(ticketHTML); printWindow.document.close(); printWindow.focus(); printWindow.print();
+      alert('✅ Salida despachada.')
+      setCart([]); setExitForm({ productId: '', packages: '', units: '', reason: 'Venta', deliveredBy: '', receivedBy: '' }); setExitSearch('');
+      await fetchData(); setView('products')
+    } catch (error) { alert('Error: ' + error.message) }
+    setLoading(false)
+  }
+
+  const totalWeight = cart.reduce((sum, item) => sum + item.weight, 0)
+  const excedePeso = !unlimitedWeight && totalWeight > maxWeight
+
+  const filteredProducts = products.filter(p => p.name.includes(searchTerm.toUpperCase()));
+  const entryFiltered = products.filter(p => p.isActive && p.name.toLowerCase().includes(entrySearch.toLowerCase()));
+  const exitFiltered = products.filter(p => p.isActive && p.name.toLowerCase().includes(exitSearch.toLowerCase()));
 
   return (
     <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '1100px', margin: '0 auto', backgroundColor: '#f9fafb', minHeight: '100vh' }}>
@@ -186,7 +279,6 @@ export default function Home() {
         <button onClick={() => { setView('exits'); setShowForm(false); }} style={{ padding: '10px 20px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', backgroundColor: view === 'exits' ? '#f59e0b' : 'transparent', color: view === 'exits' ? 'white' : '#4b5563' }}>🚚 Salidas</button>
       </div>
 
-      {/* CATEGORÍAS */}
       {view === 'categories' && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <h2>Gestión de Categorías</h2>
@@ -194,13 +286,10 @@ export default function Home() {
             <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value.toUpperCase())} placeholder="Nueva Categoría (Ej: BEBIDAS)" style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             <button type="submit" style={{ padding: '10px 20px', backgroundColor: '#0ea5e9', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>+ Agregar</button>
           </form>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {categories.map(c => <li key={c.id} style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{c.name}</li>)}
-          </ul>
+          <ul style={{ listStyle: 'none', padding: 0 }}>{categories.map(c => <li key={c.id} style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{c.name}</li>)}</ul>
         </div>
       )}
 
-      {/* MARCAS */}
       {view === 'brands' && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <h2>Gestión de Marcas</h2>
@@ -208,13 +297,10 @@ export default function Home() {
             <input type="text" value={newBrand} onChange={e => setNewBrand(e.target.value.toUpperCase())} placeholder="Nueva Marca (Ej: AJEPER)" style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             <button type="submit" style={{ padding: '10px 20px', backgroundColor: '#8b5cf6', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>+ Agregar</button>
           </form>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {brands.map(b => <li key={b.id} style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{b.name}</li>)}
-          </ul>
+          <ul style={{ listStyle: 'none', padding: 0 }}>{brands.map(b => <li key={b.id} style={{ padding: '10px', borderBottom: '1px solid #eee' }}>{b.name}</li>)}</ul>
         </div>
       )}
 
-      {/* PRODUCTOS LISTA */}
       {view === 'products' && !showForm && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -225,7 +311,7 @@ export default function Home() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ backgroundColor: '#f3f4f6', textAlign: 'left' }}><th style={{padding:'10px'}}>Código</th><th style={{padding:'10px'}}>Descripción</th><th style={{padding:'10px'}}>Peso Und</th><th style={{padding:'10px'}}>Acciones</th></tr></thead>
             <tbody>
-              {products.filter(p => p.name.includes(searchTerm.toUpperCase())).map(p => (
+              {filteredProducts.map(p => (
                   <tr key={p.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                     <td style={{ padding: '12px', fontSize: '12px', fontWeight: 'bold' }}>{p.internalCode}</td>
                     <td style={{ padding: '12px', fontWeight: 'bold' }}>{p.name}</td>
@@ -241,75 +327,160 @@ export default function Home() {
         </div>
       )}
 
-      {/* FORMULARIO DE PRODUCTO */}
       {view === 'products' && showForm && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <h2>{editingId ? 'Editar' : 'Nuevo Producto'}</h2>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-            
             <div style={{ display: 'flex', gap: '10px' }}>
               <input type="text" value={formData.barcode} onChange={e => setFormData({...formData, barcode: e.target.value})} placeholder="Código de Barras" style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
               <button type="button" onClick={() => setFormData({...formData, barcode: `200${Math.floor(Math.random() * 10000000000)}`})} style={{ padding: '10px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '6px' }}>🪄 Auto</button>
-              <button type="button" onClick={() => { setScanMode('form'); setShowScanner(true); }} style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px' }}>📷</button>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
               <select required value={formData.categoryId} onChange={e => setFormData({...formData, categoryId: e.target.value})} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
-                <option value="">Seleccione Categoría...</option>
+                <option value="">Categoría...</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <select required value={formData.brandId} onChange={e => setFormData({...formData, brandId: e.target.value})} style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
-                <option value="">Seleccione Marca...</option>
+                <option value="">Marca...</option>
                 {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '15px' }}>
-              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value.toUpperCase()})} placeholder="Nombre Base (Ej: AGUA CIELO)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+              <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value.toUpperCase()})} placeholder="Nombre (Ej: AGUA CIELO)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
               <input type="text" required value={formData.presentation} onChange={e => setFormData({...formData, presentation: e.target.value.toUpperCase()})} placeholder="Medida (Ej: 500ML)" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-              <input type="number" required value={formData.packageUnits} onChange={e => setFormData({...formData, packageUnits: e.target.value})} placeholder="Unds en paquete" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+              <input type="number" required value={formData.packageUnits} onChange={e => setFormData({...formData, packageUnits: e.target.value})} placeholder="Unds paquete" style={{ padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
             </div>
-
-            <div style={{ backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px', marginTop: '10px' }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Peso del Empaque Principal</h3>
+            <div style={{ backgroundColor: '#f3f4f6', padding: '15px', borderRadius: '8px' }}>
               <div style={{ display: 'flex', gap: '10px' }}>
-                <input type="text" required value={formData.packageName} onChange={e => setFormData({...formData, packageName: e.target.value.toUpperCase()})} placeholder="Empaque (Ej: BOLSA, PAQUETE)" style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-                <input type="number" step="0.01" required value={formData.packageWeight} onChange={e => setFormData({...formData, packageWeight: e.target.value})} placeholder="Peso Total" style={{ width: '120px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
-                <select value={formData.weightUnit} onChange={e => setFormData({...formData, weightUnit: e.target.value})} style={{ width: '80px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
+                <input type="text" required value={formData.packageName} onChange={e => setFormData({...formData, packageName: e.target.value.toUpperCase()})} placeholder="Empaque (Ej: BOLSA)" style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+                <input type="number" step="0.01" required value={formData.packageWeight} onChange={e => setFormData({...formData, packageWeight: e.target.value})} placeholder="Peso" style={{ width: '100px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+                <select value={formData.weightUnit} onChange={e => setFormData({...formData, weightUnit: e.target.value})} style={{ width: '70px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
                   <option value="g">gr</option>
                   <option value="kg">kg</option>
                 </select>
               </div>
             </div>
-
             <div style={{ padding: '15px', backgroundColor: '#e0f2fe', borderRadius: '8px', border: '1px solid #bae6fd' }}>
               <p style={{ margin: 0, fontSize: '14px', color: '#0369a1', fontWeight: 'bold' }}>📝 Descripción:</p>
               <p style={{ margin: '5px 0', fontSize: '18px', fontWeight: 'bold', color: '#0284c7' }}>{previewDescription}</p>
-              <p style={{ margin: 0, fontSize: '14px', color: '#0369a1', fontWeight: 'bold' }}>⚖️ Cálculo automático:</p>
               <p style={{ margin: '5px 0 0 0', fontSize: '16px', color: '#0284c7' }}>
-                {formData.packageName || 'Paquete'} pesa {formData.packageWeight || 0}{formData.weightUnit} | 
-                Cada unidad pesa <strong>{pesoUnidadKg.toFixed(3)} kg</strong>
+                Peso Unidad: <strong>{pesoUnidadKg.toFixed(3)} kg</strong>
               </p>
             </div>
-
-            <button type="submit" disabled={loading} style={{ padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', marginTop: '10px' }}>Guardar Producto</button>
+            <button type="submit" disabled={loading} style={{ padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>Guardar Producto</button>
             <button type="button" onClick={() => setShowForm(false)} style={{ padding: '10px', backgroundColor: 'transparent', color: '#6b7280', border: 'none', cursor: 'pointer' }}>Cancelar</button>
           </form>
         </div>
       )}
 
-      {/* ENTRADAS Y SALIDAS (Se mantienen igual que antes) */}
       {view === 'entries' && (
         <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
           <h2>Registrar Entrada</h2>
-          <p style={{ color: '#6b7280' }}>Próximamente se actualizará visualmente con las nuevas categorías.</p>
+          <form onSubmit={handleEntrySubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px' }}>
+            <div style={{ position: 'relative' }}>
+              <input type="text" placeholder="Buscar producto..." 
+                value={entryForm.productId ? products.find(p=>p.id===entryForm.productId)?.name : entrySearch} 
+                onChange={e => { setEntrySearch(e.target.value); setEntryForm({...entryForm, productId: ''}); }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+              />
+              {entrySearch && !entryForm.productId && (
+                <div style={{ position: 'absolute', zIndex: 10, width: '100%', backgroundColor: 'white', border: '1px solid #ccc', maxHeight: '150px', overflowY: 'auto', borderRadius: '6px', marginTop: '5px' }}>
+                  {entryFiltered.map(p => (
+                    <div key={p.id} onClick={() => { setEntryForm({...entryForm, productId: p.id}); setEntrySearch(''); }} style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee' }}>
+                      {p.name} (Stock: {p.stock})
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Paquetes</label>
+                <input type="number" min="0" value={entryForm.packages} onChange={e => setEntryForm({...entryForm, packages: e.target.value})} placeholder="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Unidades</label>
+                <input type="number" min="0" value={entryForm.units} onChange={e => setEntryForm({...entryForm, units: e.target.value})} placeholder="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Fecha de Vencimiento</label>
+              <input type="date" value={entryForm.expirationDate} onChange={e => setEntryForm({...entryForm, expirationDate: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+            </div>
+            <button type="submit" disabled={loading} style={{ padding: '15px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>Registrar Entrada</button>
+          </form>
         </div>
       )}
-      
+
       {view === 'exits' && (
-        <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
-          <h2>Registrar Salida</h2>
-          <p style={{ color: '#6b7280' }}>Próximamente se actualizará visualmente con las nuevas categorías.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px' }}>
+            <h2>🚚 Preparar Salida</h2>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                <select value={transportType} onChange={e => handleTransportChange(e.target.value)} style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}>
+                    <option value="Moto">Motocarga (Max 1500kg)</option>
+                    <option value="Carreta">Carreta (Max 250kg)</option>
+                    <option value="A mano">A mano (Sin límite)</option>
+                </select>
+                <input type="number" value={maxWeight} disabled={unlimitedWeight} onChange={e => setMaxWeight(e.target.value)} style={{ width: '100px', padding: '10px', borderRadius: '6px', border: '1px solid #ccc', backgroundColor: unlimitedWeight ? '#eee' : 'white' }} />
+            </div>
+            <form onSubmit={addToCart} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ position: 'relative' }}>
+                <input type="text" placeholder="Buscar producto..." 
+                  value={exitForm.productId ? products.find(p=>p.id===exitForm.productId)?.name : exitSearch} 
+                  onChange={e => { setExitSearch(e.target.value); setExitForm({...exitForm, productId: ''}); }}
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }}
+                />
+                {exitSearch && !exitForm.productId && (
+                  <div style={{ position: 'absolute', zIndex: 10, width: '100%', backgroundColor: 'white', border: '1px solid #ccc', maxHeight: '150px', overflowY: 'auto', borderRadius: '6px', marginTop: '5px' }}>
+                    {exitFiltered.map(p => (
+                      <div key={p.id} onClick={() => { setExitForm({...exitForm, productId: p.id}); setExitSearch(''); }} style={{ padding: '10px', cursor: 'pointer', borderBottom: '1px solid #eee' }}>
+                        {p.name} (Hay: {p.stock})
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Paquetes</label>
+                  <input type="number" min="0" value={exitForm.packages} onChange={e => setExitForm({...exitForm, packages: e.target.value})} placeholder="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 'bold' }}>Unidades</label>
+                  <input type="number" min="0" value={exitForm.units} onChange={e => setExitForm({...exitForm, units: e.target.value})} placeholder="0" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #ccc' }} />
+                </div>
+              </div>
+              <button type="submit" style={{ padding: '10px', backgroundColor: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>+ Agregar a Lista</button>
+            </form>
+          </div>
+          
+          <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px', border: excedePeso ? '3px solid red' : '1px solid #e5e7eb' }}>
+            <h2>Lista de Carga ({transportType})</h2>
+            <ul style={{ listStyle: 'none', padding: 0 }}>
+              {cart.map((item, index) => (
+                <li key={index} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #eee' }}>
+                  <span style={{ flex: 1 }}>{item.name}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <input type="number" value={item.quantity} onChange={(e) => updateCartQuantity(item.id, parseInt(e.target.value))} style={{ width: '60px', padding: '5px', borderRadius: '4px', border: '1px solid #ccc' }} />
+                      <button onClick={() => removeFromCart(item.id)} style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '5px 8px', borderRadius: '4px' }}>X</button>
+                  </div>
+                  <span style={{ fontWeight: 'bold', width: '70px', textAlign: 'right' }}>{item.weight.toFixed(2)} kg</span>
+                </li>
+              ))}
+            </ul>
+            <div style={{ marginTop: '20px', padding: '15px', backgroundColor: excedePeso ? '#fee2e2' : '#f3f4f6', borderRadius: '8px' }}>
+              <p style={{ margin: 0, fontWeight: 'bold' }}>Peso Total: {totalWeight.toFixed(2)} kg {unlimitedWeight ? '(Sin límite)' : `(Max: ${maxWeight} kg)`}</p>
+              {excedePeso && <p style={{ margin: '5px 0 0 0', color: '#b91c1c', fontWeight: 'bold', fontSize: '14px' }}>⚠️ ¡EXCEDE EL PESO PERMITIDO!</p>}
+            </div>
+            {cart.length > 0 && (
+              <div style={{ marginTop: '20px', borderTop: '2px solid #e5e7eb', paddingTop: '20px' }}>
+                <input type="text" placeholder="Entregado por" value={exitForm.deliveredBy} onChange={e => setExitForm({...exitForm, deliveredBy: e.target.value})} style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px' }} />
+                <input type="text" placeholder="Recibido por" value={exitForm.receivedBy} onChange={e => setExitForm({...exitForm, receivedBy: e.target.value})} style={{ width: '100%', padding: '10px', marginBottom: '10px', borderRadius: '6px' }} />
+                <button onClick={handleExitSubmit} disabled={excedePeso || loading} style={{ width: '100%', padding: '15px', backgroundColor: excedePeso ? '#9ca3af' : '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold' }}>Despachar e Imprimir</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
